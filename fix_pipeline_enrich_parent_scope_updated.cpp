@@ -41,7 +41,7 @@ static std::string utcToEstFixed5(const std::string& utcStr) {
     struct tm tmUTC;
     std::memset(&tmUTC, 0, sizeof(tmUTC));
     if (strptime(baseTime.c_str(), "%Y%m%d-%H:%M:%S", &tmUTC) == NULL) {
-        return utcStr; // keep original if parse fails
+        return utcStr;
     }
 
     time_t utcTime = timegm(&tmUTC);
@@ -74,8 +74,6 @@ static inline bool endsWith(const std::string& s, const std::string& suffix) {
            s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
-
-// Map ClOrdID first letter to SOR server number.
 static std::string getServerNum(char firstChar) {
     switch (firstChar) {
         case 'C': return "3";
@@ -86,7 +84,6 @@ static std::string getServerNum(char firstChar) {
     }
 }
 
-// Helper: split a line that may contain multiple FIX messages.
 static std::vector<std::string> splitFixMessages(const std::string& line) {
     std::vector<std::string> messages;
     const std::string delimiter = "8=FIX";
@@ -94,11 +91,8 @@ static std::vector<std::string> splitFixMessages(const std::string& line) {
 
     while (pos != std::string::npos) {
         size_t nextPos = line.find(delimiter, pos + delimiter.length());
-        if (nextPos == std::string::npos) {
-            messages.push_back(line.substr(pos));
-        } else {
-            messages.push_back(line.substr(pos, nextPos - pos));
-        }
+        if (nextPos == std::string::npos) messages.push_back(line.substr(pos));
+        else messages.push_back(line.substr(pos, nextPos - pos));
         pos = nextPos;
     }
     return messages;
@@ -123,24 +117,18 @@ static std::string getTag(const std::string& line, const std::string& tag) {
     return line.substr(valStart, valEnd - valStart);
 }
 
-// Text form: "key:value"
 static std::string extractTextValueColon(const std::string& line, const std::string& key) {
     std::string token = key + ":";
     size_t pos = line.find(token);
     if (pos == std::string::npos) return "";
 
     size_t start = pos + token.size();
-    while (start < line.size() && (line[start] == ' ' || line[start] == '\t')) {
-        ++start;
-    }
-
+    while (start < line.size() && (line[start] == ' ' || line[start] == '\t')) ++start;
     if (start >= line.size()) return "";
 
     size_t end = start;
     while (end < line.size()) {
         char c = line[end];
-        // We removed ' ' from the break condition so it captures the whole time 
-        // string until the bracket '[' starts.
         if (c == '[' || c == '\t' || c == '\r' || c == '\n' || c == ',' || c == '^' || c == '\001') break;
         ++end;
     }
@@ -148,25 +136,6 @@ static std::string extractTextValueColon(const std::string& line, const std::str
     return trim(line.substr(start, end - start));
 }
 
-// static std::string extractTextValueColon(const std::string& line, const std::string& key) {
-//     std::string token = key + ":";
-//     size_t pos = line.find(token);
-//     if (pos == std::string::npos) return "";
-
-//     size_t start = pos + token.size();
-//     if (start >= line.size()) return "";
-
-//     size_t end = start;
-//     while (end < line.size()) {
-//         char c = line[end];
-//         if (c == '[' || c == '\t' || c == '\r' || c == '\n' || c == ',' || c == '^' || c == '\001') break;
-//         ++end;
-//     }
-//     if (end <= start) return "";
-//     return trim(line.substr(start, end - start));
-// }
-
-// Text form: "key value"
 static std::string extractTextValueSpace(const std::string& line, const std::string& key) {
     std::string token = key + " ";
     size_t pos = line.find(token);
@@ -187,7 +156,6 @@ static std::string extractTextValueSpace(const std::string& line, const std::str
 }
 
 static std::string extractTextValueFlexible(const std::string& line, const std::string& key, bool allowSpace) {
-    // Prefer colon always.
     std::string v = extractTextValueColon(line, key);
     if (!v.empty()) return v;
     if (!allowSpace) return "";
@@ -200,12 +168,10 @@ static std::string lineExcerpt(const std::string& line) {
     return line.substr(0, kMax);
 }
 
-// IMPORTANT: no hexToDec for ExecID/xcid; direct string compare only.
 static bool execIdMatchesXcid(const std::string& inputExecIdRaw, const std::string& xcidRaw) {
     return iequals(trim(inputExecIdRaw), trim(xcidRaw));
 }
 
-// If v is a single char (e.g. "M"), convert to its ASCII integer string ("77").
 static std::string normalizeCharToAsciiIfSingle(const std::string& v) {
     std::string t = trim(v);
     if (t.size() == 1) {
@@ -214,6 +180,7 @@ static std::string normalizeCharToAsciiIfSingle(const std::string& v) {
     }
     return t;
 }
+
 static std::vector<std::string> parseCsvLine(const std::string& line) {
     std::vector<std::string> out;
     std::string cur;
@@ -243,7 +210,6 @@ static std::string csvEscape(const std::string& v) {
     if (v.find(',') == std::string::npos && v.find('"') == std::string::npos && v.find('\n') == std::string::npos) {
         return v;
     }
-
     std::string out = "\"";
     for (size_t i = 0; i < v.size(); ++i) {
         if (v[i] == '"') out += "\"\"";
@@ -253,17 +219,10 @@ static std::string csvEscape(const std::string& v) {
     return out;
 }
 
-// =========================
-// Configuration: original diff CSV columns handling
-// =========================
-// Drop columns from the original diff CSV in the enriched output (exact header match).
-
 static const std::unordered_set<std::string> kDropOriginalColumns = {
-    // e.g. "SomeDebugCol",
     "File"
 };
 
-// Rename original columns in the enriched output: oldName -> newName.
 static const std::unordered_map<std::string, std::string> kRenameOriginalColumns = {
     {"Exec_ID", "exchange_exec_id"},
     {"LastQty","filled_size_delta"},
@@ -273,24 +232,14 @@ static const std::unordered_map<std::string, std::string> kRenameOriginalColumns
     {"Exchange_ID","exch_id"}
 };
 
-// Treat these original diff CSV columns as integers when filling missing values.
-// Missing -> "0" instead of empty.
 static const std::unordered_set<std::string> kOriginalIntColumns = {
-    // Common ones (edit as needed):
     "LastQty",
     "CumQty",
     "OrderQty",
 };
 
-// Optional: add extra empty columns (they will be created as blank cells in every row).
 static const std::vector<std::string> kExtraEmptyColumns = {
-    // e.g. "notes", "owner"
 };
-
-// Optional: enforce a preferred output order.
-// - Put the exact final column names here (after rename), including enriched columns.
-// - Columns listed here will appear first (in this order). Any remaining columns are appended after.
-// - If you list a column name that doesn't exist, it will be created as an empty column.
 
 static const std::vector<std::string> kOutputColumnOrder = {
     "date", "sym", "time", "sor_id", "side", "next_index", "status", "action",
@@ -299,7 +248,7 @@ static const std::vector<std::string> kOutputColumnOrder = {
     "onleave_internal", "onleave_market", "id", "update_time", "update_time_micros",
     "exchange_transact_time", "creation_time", "index", "price", "exch_id",
     "parent", "original", "algo_sender_compid", "order_id_by_algo", "cross_type",
-    "tif", "parent_id", "quote_size", "quote_type", "clorderid", "causal_msg_seqnum",
+    "tif", "quote_size", "quote_type", "clorderid", "causal_msg_seqnum",
     "quote_time", "wave_index", "seq_index", "bsor_exec_id", "exchange_exec_id",
     "bid_exch_id", "bid_nbbo_price", "bid_ubbo_price0", "bid_ubbo_price1",
     "bid_ubbo_price2", "bid_nbbo_size", "bid_ubbo_size0", "bid_ubbo_size1",
@@ -310,14 +259,9 @@ static const std::vector<std::string> kOutputColumnOrder = {
     "ask_ubbo_time1", "ask_ubbo_time2", "max_floor", "quote_size_to_limit_px",
     "min_fill_size", "exec_inst", "reserved", "broker_id", "filled_size_delta",
     "liquidity_indicator"
-
 };
 
-// Optional: cast/transform original diff CSV columns by name before writing (after rename).
-// For lightweight needs, keep this empty and handle special casts inline in writeEnrichedCsv.
-// Example: if (name == "LastQty") return castToIntString(v);
 static std::string castOriginalColumnValue(const std::string& name, const std::string& v) {
-    //(void)name;
     if(name == "status") return normalizeCharToAsciiIfSingle(v);
     return v;
 }
@@ -326,23 +270,27 @@ static inline std::string defaultOriginalMissing(const std::string& headerName) 
     return kOriginalIntColumns.count(headerName) ? "0" : "";
 }
 
-// Populated at runtime from buildExtractorSpecs() so writeEnrichedCsv can choose defaults.
-static std::unordered_map<std::string, ValueType> gEnrichedColTypes;
+enum SourceType { TEXT_KV, FIX_TAG, DUAL_TEXT_TAG, COMPUTED };
+enum ValueType { VT_STRING, VT_INT };
+enum MatchScope { MS_CLORD_ONLY, MS_PAIR_STRICT, MS_PARENT_TEXT, MS_PARENT_FIX };
 
+typedef std::string (*NormalizeFn)(const std::string&);
+typedef std::string (*ComputeFn)(const std::unordered_map<std::string, std::string>& textKv,
+                                 const std::unordered_map<std::string, std::string>& fixTags,
+                                 const std::string& sourceLine);
+
+static std::unordered_map<std::string, ValueType> gEnrichedColTypes;
 
 static bool linePrefilter(const std::string& line) {
     if (line.find("8=FIX") != std::string::npos) return true;
     if (line.find("strtID:") != std::string::npos || line.find("strtID ") != std::string::npos) return true;
     if (line.find("xcid:") != std::string::npos || line.find("xcid ") != std::string::npos) return true;
+    if (line.find("id:") != std::string::npos && line.find("strt:0") != std::string::npos) return true;
     if (line.find("11=") != std::string::npos) return true;
     if (line.find("9607=") != std::string::npos) return true;
     if (line.find("17=") != std::string::npos) return true;
     return false;
 }
-
-// =========================
-// Mode 1: scan_all (kept as-is; user said ignore, but we keep for completeness)
-// =========================
 
 static void processAllLogs(const std::string& directory, const std::string& outputCsv) {
     DIR* dir = opendir(directory.c_str());
@@ -413,26 +361,7 @@ static void processAllLogs(const std::string& directory, const std::string& outp
     closedir(dir);
 }
 
-// =========================
-// Mode 2: enrich_diff
-// =========================
-
-enum SourceType { TEXT_KV, FIX_TAG, DUAL_TEXT_TAG, COMPUTED };
-
-// For output defaults ("missing" values) so the enriched CSV can be loaded into kdb cleanly.
-// - VT_INT    -> "0"
-// - VT_STRING -> "" (empty)
-enum ValueType { VT_STRING, VT_INT };
-enum MatchScope { MS_CLORD_ONLY, MS_PAIR_STRICT, MS_PARENT_TEXT, MS_PARENT_FIX };
-
-typedef std::string (*NormalizeFn)(const std::string&);
-typedef std::string (*ComputeFn)(const std::unordered_map<std::string, std::string>& textKv,
-                                 const std::unordered_map<std::string, std::string>& fixTags,
-                                 const std::string& sourceLine);
-
 static std::string normalizeTrim(const std::string& v) { return trim(v); }
-
-
 
 static std::string normalizeHexToDec(const std::string& v) {
     std::string t = trim(v);
@@ -445,36 +374,24 @@ static std::string normalizeHexToDec(const std::string& v) {
 }
 
 struct ExtractorSpec {
-    // Identity
     std::string field_name;
     SourceType source_type;
-
-    // Input selectors
-    std::string text_key;   // TEXT/DUAL
-    std::string fix_tag;    // FIX/DUAL
-    bool allow_space;       // whether "key value" is allowed (colon always preferred)
-
-    // Output
-    std::string out_final_col;     // always present
-    std::string out_mismatch_col;  // only for DUAL (else empty)
-
-    // Normalization / casting
-    NormalizeFn normalize_text; // TEXT + DUAL text side
-    NormalizeFn normalize_tag;  // FIX  + DUAL tag side
-
-    // Computed
+    std::string text_key;
+    std::string fix_tag;
+    bool allow_space;
+    std::string out_final_col;
+    std::string out_mismatch_col;
+    NormalizeFn normalize_text;
+    NormalizeFn normalize_tag;
     ComputeFn compute;
-
-    // Output type (used only for choosing default "missing" value).
     ValueType value_type;
     MatchScope match_scope;
 };
 
-static inline std::string defaultMissing(ValueType t) {
-    return (t == VT_INT) ? "0" : "";
+static inline std::string defaultMissing(ValueType) {
+    return "";
 }
 
-// Helper constructors to make specs easy to add.
 static ExtractorSpec Text(const std::string& outCol,
                           const std::string& textKey,
                           NormalizeFn norm = normalizeTrim,
@@ -539,7 +456,7 @@ static ExtractorSpec Dual(const std::string& outCol,
     return s;
 }
 
-static ExtractorSpec Computed(const std::string& outCol, ComputeFn fn, MatchScope scope = MS_CLORD_ONLY) {
+static ExtractorSpec Computed(const std::string& outCol, ComputeFn fn, MatchScope scope = MS_PAIR_STRICT) {
     ExtractorSpec s;
     s.field_name = outCol;
     s.source_type = COMPUTED;
@@ -556,13 +473,8 @@ static ExtractorSpec Computed(const std::string& outCol, ComputeFn fn, MatchScop
     return s;
 }
 
-// =========================
-// Computed fields
-// =========================
-
-// Liquidity: prefer tag 851; otherwise infer from IOC markers.
-static std::string computeLiquidity(const std::unordered_map<std::string, std::string>& /*textKv*/,
-                                    const std::unordered_map<std::string, std::string>& /*fixTags*/,
+static std::string computeLiquidity(const std::unordered_map<std::string, std::string>&,
+                                    const std::unordered_map<std::string, std::string>&,
                                     const std::string& line) {
     std::string t851 = getTag(line, "851");
     if (!t851.empty()) return normalizeCharToAsciiIfSingle(t851);
@@ -570,134 +482,116 @@ static std::string computeLiquidity(const std::unordered_map<std::string, std::s
     if(t9730 == "R") return "50";
     if(t9730 == "A") return "49";
     if(!t9730.empty()) return normalizeCharToAsciiIfSingle(t9730);
-    // if (t851 == "1") return "POST";
-    // if (t851 == "2") return "TAKE";
     if (line.find("59=3") != std::string::npos) return "50";
     if (line.find("tif:IOC") != std::string::npos) return "50";
     return "UNKNOWN";
 }
 
-// Visibility: compare mflr vs sz (text) else 111 vs 38 (tags) else infer from 18/111.
-static std::string computeVisibility(const std::unordered_map<std::string, std::string>& /*textKv*/,
-                                     const std::unordered_map<std::string, std::string>& /*fixTags*/,
-                                     const std::string& line) {
-    std::string mflr = extractTextValueColon(line, "mflr");
-    std::string sz   = extractTextValueColon(line, "sz");
-    if (!mflr.empty() && !sz.empty()) {
-        return (trim(mflr) == trim(sz)) ? "LIT" : "HIDDEN";
-    }
-
-    std::string t111 = getTag(line, "111");
-    std::string t38  = getTag(line, "38");
-    if (!t111.empty() && !t38.empty()) {
-        return (trim(t111) == trim(t38)) ? "LIT" : "HIDDEN";
-    }
-
-    std::string t18 = getTag(line, "18");
-    if (t18 == "M" || t111 == "0") return "HIDDEN";
-    return "UNKNOWN";
-}
-
-// SendingTime (tag 60) converted to EST (-5h).
-static std::string computeSendingTimeEstFull(const std::unordered_map<std::string, std::string>& /*textKv*/,
-                                            const std::unordered_map<std::string, std::string>& /*fixTags*/,
-                                            const std::string& line) {
+static std::string computeSendingTimeEstFull(const std::unordered_map<std::string, std::string>&,
+                                             const std::unordered_map<std::string, std::string>&,
+                                             const std::string& line) {
     std::string t60 = getTag(line, "60");
     if (t60.empty()) return "";
     return utcToEstFixed5(trim(t60));
 }
 
-// Split sending_time_est into date/time columns.
-// Output format from utcToEstFixed5: YYYYMMDD-HH:MM:SS[.sss]
 static std::string computeSendingDateEst(const std::unordered_map<std::string, std::string>& textKv,
-                                        const std::unordered_map<std::string, std::string>& fixTags,
-                                        const std::string& line) {
+                                         const std::unordered_map<std::string, std::string>& fixTags,
+                                         const std::string& line) {
     (void)textKv; (void)fixTags;
     std::string est = computeSendingTimeEstFull(textKv, fixTags, line);
     if (est.size() < 8) return "UNKNOWN";
     return est.substr(0, 8);
 }
 
-static std::string computeSendingTimeEst(const std::unordered_map<std::string, std::string>& textKv,
-                                        const std::unordered_map<std::string, std::string>& fixTags,
-                                        const std::string& line) {
-    
-    std::string est = extractTextValueColon(line,"INFO");
+static std::string computeSendingTimeEst(const std::unordered_map<std::string, std::string>&,
+                                         const std::unordered_map<std::string, std::string>&,
+                                         const std::string& line) {
+    std::string est = extractTextValueColon(line, "INFO");
     if (est.empty()) return "UNKNOWN";
     return est;
 }
 
 static std::string computeSendingTimeEstMilli(const std::unordered_map<std::string, std::string>& textKv,
-                                        const std::unordered_map<std::string, std::string>& fixTags,
-                                        const std::string& line) {
-    
-    std::string est = computeSendingTimeEst(textKv,fixTags,line);
+                                              const std::unordered_map<std::string, std::string>& fixTags,
+                                              const std::string& line) {
+    std::string est = computeSendingTimeEst(textKv, fixTags, line);
     if(est=="UNKOWN") return "";
-    int hh, mm, ss, s_sub;
+    int hh=0, mm=0, ss=0, s_sub=0;
     sscanf(est.c_str(), "%d:%d:%d.%d", &hh, &mm, &ss, &s_sub);
-
     long long totalMillis = (hh * 3600000LL) + (mm * 60000LL) + (ss * 1000LL) + (s_sub / 1000);
     return std::to_string(totalMillis);
-    
 }
+
 static std::string computeSendingTimeEstTime(const std::unordered_map<std::string, std::string>& textKv,
-                                        const std::unordered_map<std::string, std::string>& fixTags,
-                                        const std::string& line) {
-    
+                                             const std::unordered_map<std::string, std::string>& fixTags,
+                                             const std::string& line) {
     std::string est = computeSendingTimeEst(textKv,fixTags,line);
     if(est=="UNKOWN") return "";
-    if (est.length() >= 12) {
-        std::string milliTime = est.substr(0, 12);
-        return milliTime;
-}
+    if (est.length() >= 12) return est.substr(0, 12);
     return est;
-    
 }
 
 static std::string computeSendingTimeEstMicro(const std::unordered_map<std::string, std::string>& textKv,
-                                        const std::unordered_map<std::string, std::string>& fixTags,
-                                        const std::string& line) {
-    
+                                              const std::unordered_map<std::string, std::string>& fixTags,
+                                              const std::string& line) {
     std::string est = computeSendingTimeEst(textKv,fixTags,line);
     if(est=="UNKOWN") return "";
-    int hh, mm, ss, fractional;
+    int hh=0, mm=0, ss=0, fractional=0;
     if (sscanf(est.c_str(), "%d:%d:%d.%d", &hh, &mm, &ss, &fractional) == 4) {
         int microRemainder = fractional % 1000;
         return std::to_string(microRemainder);
     }
     return "";
-    
 }
+
 static std::string computeSendingTimeEstTransact(const std::unordered_map<std::string, std::string>& textKv,
-                                        const std::unordered_map<std::string, std::string>& fixTags,
-                                        const std::string& line) {
-    
+                                                 const std::unordered_map<std::string, std::string>& fixTags,
+                                                 const std::string& line) {
     std::string est = computeSendingTimeEst(textKv,fixTags,line);
     if(est=="UNKOWN") return "";
-    int hh, mm, ss, fractional;
+    int hh=0, mm=0, ss=0, fractional=0;
     if (sscanf(est.c_str(), "%d:%d:%d.%d", &hh, &mm, &ss, &fractional) == 4) {
-        
         long long baseMillis = (hh * 3600000LL) + (mm * 60000LL) + (ss * 1000LL);
         int millisPart = fractional / 1000;
-        int microRemainder = fractional % 1000; 
-
-        // 1. Calculate and Round Milliseconds
+        int microRemainder = fractional % 1000;
         long long roundedMillis = baseMillis + millisPart;
-        if (microRemainder >= 500) {
-            roundedMillis += 1;
-        }
-
-        // 2. Convert to Microseconds (Adding three zeros)
+        if (microRemainder >= 500) roundedMillis += 1;
         long long finalMicros = roundedMillis * 1000LL;
         return std::to_string(finalMicros);
-
     }
     return "";
-    
 }
-static std::string computeAlgoSenderId(const std::unordered_map<std::string, std::string>& /*textKv*/,
-                                        const std::unordered_map<std::string, std::string>& fixTags,
-                                        const std::string& line) {
+
+static std::string diagnoseAlgoSenderCompid(const std::unordered_map<std::string, std::string>& fixTags,
+                                            const std::string& line) {
+    std::string t49;
+    std::unordered_map<std::string, std::string>::const_iterator it49 = fixTags.find("49");
+    if (it49 != fixTags.end()) t49 = trim(it49->second);
+    if (t49.empty()) t49 = getTag(line, "49");
+    if (t49.empty()) return "missing_tag49";
+
+    if (t49.compare(0, 4, "CASH") == 0) {
+        std::string t50;
+        std::unordered_map<std::string, std::string>::const_iterator it50 = fixTags.find("50");
+        if (it50 != fixTags.end()) t50 = trim(it50->second);
+        if (t50.empty()) t50 = getTag(line, "50");
+        if (t50.empty()) return "missing_tag50_for_cash_sender";
+        if (t50.size() < 3) return "tag50_shorter_than_3";
+        return "";
+    }
+
+    std::string t9702;
+    std::unordered_map<std::string, std::string>::const_iterator it9702 = fixTags.find("9702");
+    if (it9702 != fixTags.end()) t9702 = trim(it9702->second);
+    if (t9702.empty()) t9702 = getTag(line, "9702");
+    if (t9702.empty()) return "missing_tag9702";
+    return "";
+}
+
+static std::string computeAlgoSenderId(const std::unordered_map<std::string, std::string>&,
+                                       const std::unordered_map<std::string, std::string>& fixTags,
+                                       const std::string& line) {
     std::string t49;
     std::unordered_map<std::string, std::string>::const_iterator it49 = fixTags.find("49");
     if (it49 != fixTags.end()) t49 = trim(it49->second);
@@ -709,14 +603,16 @@ static std::string computeAlgoSenderId(const std::unordered_map<std::string, std
         std::unordered_map<std::string, std::string>::const_iterator it50 = fixTags.find("50");
         if (it50 != fixTags.end()) t50 = trim(it50->second);
         if (t50.empty()) t50 = getTag(line, "50");
-        return (t50.size() >= 3) ? (t49 + t50.substr(0, 3)) : "";
+        if (t50.empty() || t50.size() < 3) return "";
+        return t49 + " " + t50.substr(0, 3);
     }
 
     std::string t9702;
     std::unordered_map<std::string, std::string>::const_iterator it9702 = fixTags.find("9702");
     if (it9702 != fixTags.end()) t9702 = trim(it9702->second);
     if (t9702.empty()) t9702 = getTag(line, "9702");
-    return t9702.empty() ? "" : t49 + t9702;
+    if (t9702.empty()) return "";
+    return t49 + " " + t9702;
 }
 
 static std::string trimToMillis(const std::string& s) {
@@ -727,7 +623,7 @@ static std::string trimToMillis(const std::string& s) {
     return t;
 }
 
-static std::string computeCreationTime(const std::unordered_map<std::string, std::string>& /*textKv*/,
+static std::string computeCreationTime(const std::unordered_map<std::string, std::string>&,
                                        const std::unordered_map<std::string, std::string>& fixTags,
                                        const std::string& line) {
     std::string mType;
@@ -741,27 +637,18 @@ static std::string computeCreationTime(const std::unordered_map<std::string, std
     return trimToMillis(infoTs);
 }
 
-// static std::string computeSendingTimeEst(const std::unordered_map<std::string, std::string>& textKv,
-//                                         const std::unordered_map<std::string, std::string>& fixTags,
-//                                         const std::string& line) {
-//     (void)textKv; (void)fixTags;
-//     std::string est = computeSendingTimeEstFull(textKv, fixTags, line);
-//     size_t dash = est.find('-');
-//     if (dash == std::string::npos || dash + 1 >= est.size()) return "UNKNOWN";
-//     return est.substr(dash + 1);
-// }
-static std::string computeNotional(const std::unordered_map<std::string, std::string>& /*textKv*/,
-                                            const std::unordered_map<std::string, std::string>& /*fixTags*/,
-                                            const std::string& line) {
+static std::string computeNotional(const std::unordered_map<std::string, std::string>&,
+                                   const std::unordered_map<std::string, std::string>&,
+                                   const std::string& line) {
     std::string t6 = getTag(line, "6");
     std::string t14 = getTag(line,"14");
     if(t6.empty() || t14.empty()) return "";
     return std::to_string(std::stod(t6) * std::stod(t14));
 }
+
 static std::vector<ExtractorSpec> buildExtractorSpecs() {
     std::vector<ExtractorSpec> specs;
 
-    // TEXT-only fields bound to current ClOrdID only (no ExecID required)
     specs.push_back(Text("next_index", "nxt")); specs.back().value_type = VT_INT;
     specs.push_back(Text("action", "act")); specs.back().value_type = VT_STRING;
     specs.push_back(Text("wave_index", "wav")); specs.back().value_type = VT_INT;
@@ -783,50 +670,44 @@ static std::vector<ExtractorSpec> buildExtractorSpecs() {
     specs.push_back(Text("index", "order index", normalizeTrim, true)); specs.back().value_type = VT_INT;
     specs.push_back(Text("last_filled_price", "lastPx"));
 
-    // Parent-derived text fields: use strtID:parent_id line
     specs.push_back(Text("algo_id", "aid", normalizeTrim, false, MS_PARENT_TEXT)); specs.back().value_type = VT_INT;
     specs.push_back(Text("onleave_internal", "oitn", normalizeTrim, false, MS_PARENT_TEXT)); specs.back().value_type = VT_INT;
     specs.push_back(Text("onleave_market", "omkt", normalizeTrim, false, MS_PARENT_TEXT)); specs.back().value_type = VT_INT;
 
-    // FIX-only fields bound to strict (ClOrdID, ExecID) pair
     specs.push_back(Tag("causal_msg_seqnum", "34")); specs.back().value_type = VT_INT;
     specs.push_back(Tag("tif", "59", normalizeCharToAsciiIfSingle)); specs.back().value_type = VT_INT;
 
-    // DUAL fields (strict pair only)
-    specs.push_back(Dual("side", "sd", "54", normalizeCharToAsciiIfSingle)); specs.back().value_type = VT_STRING;
-    specs.push_back(Dual("price", "px", "44")); specs.back().value_type = VT_STRING;
-    specs.push_back(Dual("filled_size", "fll", "14")); specs.back().value_type = VT_INT;
-    specs.push_back(Dual("exec_inst", "t18", "18", normalizeTrim, normalizeCharToAsciiIfSingle)); specs.back().value_type = VT_INT;
-    specs.push_back(Dual("broker_id", "brkr", "76")); specs.back().value_type = VT_INT;
-    specs.push_back(Dual("target_size", "sz", "38")); specs.back().value_type = VT_INT;
-    specs.push_back(Dual("cross_type", "aggr", "40", normalizeCharToAsciiIfSingle, normalizeCharToAsciiIfSingle)); specs.back().value_type = VT_INT;
+    specs.push_back(Dual("side", "sd", "54", normalizeCharToAsciiIfSingle, normalizeCharToAsciiIfSingle)); specs.back().value_type = VT_STRING;
+    specs.back().match_scope = MS_PAIR_STRICT;
+    specs.push_back(Dual("price", "px", "44")); specs.back().value_type = VT_STRING; specs.back().match_scope = MS_PAIR_STRICT;
+    specs.push_back(Dual("filled_size", "fll", "14")); specs.back().value_type = VT_INT; specs.back().match_scope = MS_PAIR_STRICT;
+    specs.push_back(Dual("exec_inst", "t18", "18", normalizeTrim, normalizeCharToAsciiIfSingle)); specs.back().value_type = VT_INT; specs.back().match_scope = MS_PAIR_STRICT;
+    specs.push_back(Dual("broker_id", "brkr", "76")); specs.back().value_type = VT_INT; specs.back().match_scope = MS_PAIR_STRICT;
+    specs.push_back(Dual("target_size", "sz", "38")); specs.back().value_type = VT_INT; specs.back().match_scope = MS_PAIR_STRICT;
+    specs.push_back(Dual("cross_type", "aggr", "40", normalizeCharToAsciiIfSingle, normalizeCharToAsciiIfSingle)); specs.back().value_type = VT_INT; specs.back().match_scope = MS_PAIR_STRICT;
 
-    // COMPUTED fields on current-clOrd lines
     specs.push_back(Computed("filled_notional", &computeNotional)); specs.back().value_type = VT_STRING;
+    specs.back().match_scope = MS_PAIR_STRICT;
     specs.push_back(Computed("liquidity_indicator", &computeLiquidity)); specs.back().value_type = VT_STRING;
-    specs.push_back(Computed("date", &computeSendingDateEst)); specs.back().value_type = VT_STRING;
-    specs.push_back(Computed("update_time", &computeSendingTimeEstMilli)); specs.back().value_type = VT_STRING;
-    specs.push_back(Computed("update_time_micros", &computeSendingTimeEstMicro)); specs.back().value_type = VT_STRING;
-    specs.push_back(Computed("time", &computeSendingTimeEstTime)); specs.back().value_type = VT_STRING;
-    specs.push_back(Computed("exchange_transact_time", &computeSendingTimeEstTransact)); specs.back().value_type = VT_STRING;
-    specs.push_back(Computed("creation_time", &computeCreationTime)); specs.back().value_type = VT_STRING;
+    specs.back().match_scope = MS_PAIR_STRICT;
+    specs.push_back(Computed("date", &computeSendingDateEst)); specs.back().value_type = VT_STRING; specs.back().match_scope = MS_PAIR_STRICT;
+    specs.push_back(Computed("update_time", &computeSendingTimeEstMilli)); specs.back().value_type = VT_STRING; specs.back().match_scope = MS_PAIR_STRICT;
+    specs.push_back(Computed("update_time_micros", &computeSendingTimeEstMicro)); specs.back().value_type = VT_STRING; specs.back().match_scope = MS_PAIR_STRICT;
+    specs.push_back(Computed("time", &computeSendingTimeEstTime)); specs.back().value_type = VT_STRING; specs.back().match_scope = MS_PAIR_STRICT;
+    specs.push_back(Computed("exchange_transact_time", &computeSendingTimeEstTransact)); specs.back().value_type = VT_STRING; specs.back().match_scope = MS_PAIR_STRICT;
+    specs.push_back(Computed("creation_time", &computeCreationTime)); specs.back().value_type = VT_STRING; specs.back().match_scope = MS_CLORD_ONLY;
 
-    // Parent-derived FIX computed field: use FIX line where 11=parent_id
     specs.push_back(Computed("algo_sender_compid", &computeAlgoSenderId, MS_PARENT_FIX)); specs.back().value_type = VT_STRING;
 
     return specs;
 }
 
-// =========================
-// Data structures
-// =========================
-
 struct DiffRow {
     std::vector<std::string> cols;
     std::string clOrdId;
     std::string execId;
-    std::string filePath; // optional File column
-    std::string parentId; // optional parent from external map
+    std::string filePath;
+    std::string parentId;
 };
 
 struct ErrorRow {
@@ -839,11 +720,25 @@ struct ErrorRow {
     std::string excerpt;
 };
 
+struct ParentDebugState {
+    bool sawParentTextLine;
+    bool sawParentFixLine;
+    std::string parentTextFile;
+    std::string parentFixFile;
+    std::string parentTextExcerpt;
+    std::string parentFixExcerpt;
+    std::string algoSenderMissingReason;
+
+    ParentDebugState()
+        : sawParentTextLine(false), sawParentFixLine(false) {}
+};
+
 struct TargetState {
     DiffRow row;
-    std::unordered_map<std::string, std::string> outValues; // final output columns + mismatch flags
+    std::unordered_map<std::string, std::string> outValues;
     std::unordered_set<std::string> mismatchRecorded;
     bool matched;
+    ParentDebugState parentDebug;
 };
 
 static std::string unknownValue() { return "UNKNOWN"; }
@@ -867,18 +762,13 @@ static void setIfUnknown(std::unordered_map<std::string, std::string>& out,
     }
 }
 
-// DUAL policy:
-// - both present and equal -> final=value, mismatch=0
-// - both present and not equal -> final=MISMATCH, mismatch=1, plus error row
-// - only one present -> final=that value, mismatch=0
-// - neither present -> final=UNKNOWN, mismatch=UNKNOWN
 static void applyDualField(const ExtractorSpec& spec,
                            const std::string& maybeTextRaw,
                            const std::string& maybeTagRaw,
                            TargetState& target,
-                           std::vector<ErrorRow>& /*errors*/,
-                           const std::string& /*sourceFile*/,
-                           const std::string& /*sourceLine*/) {
+                           std::vector<ErrorRow>&,
+                           const std::string&,
+                           const std::string&) {
     std::string textVal = "";
     std::string tagVal = "";
 
@@ -899,13 +789,6 @@ static void applyDualField(const ExtractorSpec& spec,
         target.outValues.find(spec.out_final_col);
     std::string existing = (itExisting == target.outValues.end()) ? "" : trim(itExisting->second);
     bool hasExisting = !existing.empty() && existing != unknownValue();
-
-    if (hasText && hasTag && textVal != tagVal) {
-        LOG(WARNING) << "Source conflict for " << spec.out_final_col
-                     << " ClOrdID=" << target.row.clOrdId
-                     << " ExecID=" << target.row.execId
-                     << " text='" << textVal << "' tag='" << tagVal << "'";
-    }
 
     std::string chosen = "";
     if (hasText) chosen = textVal;
@@ -956,7 +839,6 @@ static void applyExtractorSpecs(const std::vector<ExtractorSpec>& specs,
 
             std::unordered_map<std::string, std::string>::const_iterator itText = textKv.find(spec.text_key);
             if (itText != textKv.end()) rawText = itText->second;
-
             std::unordered_map<std::string, std::string>::const_iterator itTag = fixTags.find(spec.fix_tag);
             if (itTag != fixTags.end()) rawTag = itTag->second;
 
@@ -972,8 +854,9 @@ static void applyExtractorSpecs(const std::vector<ExtractorSpec>& specs,
 static std::unordered_map<std::string, std::string> collectTextKVs(const std::string& line,
                                                                    const std::vector<ExtractorSpec>& specs) {
     std::unordered_map<std::string, std::string> kv;
-    kv["strtID"] = extractTextValueFlexible(line, "strtID", /*allowSpace=*/true);
-    kv["xcid"]   = extractTextValueFlexible(line, "xcid",   /*allowSpace=*/true);
+    kv["strtID"] = extractTextValueFlexible(line, "strtID", true);
+    kv["xcid"]   = extractTextValueFlexible(line, "xcid",   true);
+    kv["id"]     = extractTextValueFlexible(line, "id",     false);
 
     for (size_t i = 0; i < specs.size(); ++i) {
         if (specs[i].source_type == TEXT_KV || specs[i].source_type == DUAL_TEXT_TAG) {
@@ -999,9 +882,7 @@ static std::unordered_map<std::string, std::string> collectFixTags(const std::st
 
     for (size_t i = 0; i < specs.size(); ++i) {
         if (specs[i].source_type == FIX_TAG || specs[i].source_type == DUAL_TEXT_TAG) {
-            if (!specs[i].fix_tag.empty()) {
-                tags[specs[i].fix_tag] = getTag(fixMsg, specs[i].fix_tag);
-            }
+            if (!specs[i].fix_tag.empty()) tags[specs[i].fix_tag] = getTag(fixMsg, specs[i].fix_tag);
         }
     }
     return tags;
@@ -1012,7 +893,6 @@ static bool isTargetConsistent(const TargetState& target,
                                const std::string& observedExec,
                                bool observedExecIsXcid) {
     if (!observedClOrd.empty() && observedClOrd != target.row.clOrdId) return false;
-
     if (!observedExec.empty()) {
         if (observedExecIsXcid) {
             if (!execIdMatchesXcid(target.row.execId, observedExec)) return false;
@@ -1056,21 +936,16 @@ static size_t applyToCandidates(const std::unordered_set<int>& candidateIds,
                                 const std::string& sourceFile,
                                 const std::string& sourceLine) {
     size_t newlyMatched = 0;
-
     for (std::unordered_set<int>::const_iterator it = candidateIds.begin(); it != candidateIds.end(); ++it) {
         int idx = *it;
         if (idx < 0 || (size_t)idx >= targets.size()) continue;
-
         TargetState& target = targets[(size_t)idx];
-
         if (!isTargetConsistent(target, observedClOrd, observedExec, observedExecIsXcid)) continue;
 
         const bool hasClOrd = !observedClOrd.empty();
         const bool hasExec = !observedExec.empty();
 
-        if (hasClOrd) {
-            applyExtractorSpecs(specs, textKv, fixTags, target, errors, sourceFile, sourceLine, MS_CLORD_ONLY);
-        }
+        if (hasClOrd) applyExtractorSpecs(specs, textKv, fixTags, target, errors, sourceFile, sourceLine, MS_CLORD_ONLY);
         if (hasClOrd && hasExec) {
             applyExtractorSpecs(specs, textKv, fixTags, target, errors, sourceFile, sourceLine, MS_PAIR_STRICT);
             if (!target.matched) {
@@ -1113,15 +988,12 @@ static bool loadDiffCsv(const std::string& diffCsv,
     }
 
     hasFileColumn = (fileIdx >= 0);
-
     if (clOrdIdx < 0 || execIdx < 0) {
         LOG(ERROR) << "Diff CSV must contain ClOrdID and Exec_ID (or ExecID).";
         return false;
     }
 
     std::unordered_set<std::string> uniquePairs;
-
-    // Record invalid ClOrdID rows (length != 14) so you can inspect / fix upstream.
     ensureDir("search_results");
     std::string invalidPath = "search_results/invalid_diff_rows.csv";
     std::ofstream invalidOut(invalidPath.c_str(), std::ios::app);
@@ -1130,12 +1002,9 @@ static bool loadDiffCsv(const std::string& diffCsv,
         std::ifstream chk(invalidPath.c_str());
         invalidNew = (!chk.is_open() || chk.peek() == std::ifstream::traits_type::eof());
     }
-    if (invalidNew && invalidOut.is_open()) {
-        invalidOut << "LineNo,ClOrdID,ExecID,Reason,RowRaw\n";
-    }
+    if (invalidNew && invalidOut.is_open()) invalidOut << "LineNo,ClOrdID,ExecID,Reason,RowRaw\n";
 
-    size_t lineNo = 1; // header already read
-
+    size_t lineNo = 1;
     while (std::getline(in, line)) {
         ++lineNo;
         if (trim(line).empty()) continue;
@@ -1152,8 +1021,7 @@ static bool loadDiffCsv(const std::string& diffCsv,
 
         if (target.row.clOrdId.size() != 14) {
             if (invalidOut.is_open()) {
-                invalidOut << lineNo << ","
-                           << csvEscape(target.row.clOrdId) << ","
+                invalidOut << lineNo << "," << csvEscape(target.row.clOrdId) << ","
                            << csvEscape(target.row.execId) << ","
                            << "ClOrdID_length_not_14," << csvEscape(line) << "\n";
             }
@@ -1161,16 +1029,11 @@ static bool loadDiffCsv(const std::string& diffCsv,
         }
 
         std::string pairKey = target.row.clOrdId + "\x1f" + target.row.execId;
-        if (uniquePairs.count(pairKey)) {
-            LOG(WARNING) << "Duplicate pair in diff CSV, skipping: " << target.row.clOrdId
-                         << " / " << target.row.execId;
-            continue;
-        }
+        if (uniquePairs.count(pairKey)) continue;
         uniquePairs.insert(pairKey);
 
         int idx = (int)targets.size();
         targets.push_back(target);
-
         byClOrd[target.row.clOrdId].push_back(idx);
         byExec[target.row.execId].push_back(idx);
     }
@@ -1181,13 +1044,13 @@ static bool loadDiffCsv(const std::string& diffCsv,
 }
 
 static bool loadParentMap(const std::string& mapCsv,
-                          std::unordered_map<std::string, std::string>& clOrdToParent) {
-    clOrdToParent.clear();
+                          std::unordered_map<std::string, std::string>& clOrdToOrderIdByAlgo) {
+    clOrdToOrderIdByAlgo.clear();
     if (mapCsv.empty()) return true;
 
     std::ifstream in(mapCsv.c_str());
     if (!in.is_open()) {
-        LOG(ERROR) << "Failed to open parent map CSV: " << mapCsv;
+        LOG(ERROR) << "Failed to open order_id_by_algo map CSV: " << mapCsv;
         return false;
     }
 
@@ -1200,10 +1063,10 @@ static bool loadParentMap(const std::string& mapCsv,
     for (size_t i = 0; i < headers.size(); ++i) {
         std::string h = trim(headers[i]);
         if (iequals(h, "ClOrdID") || iequals(h, "clorderid") || iequals(h, "cl_ord_id")) clIdx = (int)i;
-        else if (iequals(h, "parent") || iequals(h, "parent_id") || iequals(h, "ParentID")) pIdx = (int)i;
+        else if (iequals(h, "order_id_by_algo") || iequals(h, "OrderIDByAlgo")) pIdx = (int)i;
     }
     if (clIdx < 0 || pIdx < 0) {
-        LOG(ERROR) << "Parent map CSV must contain ClOrdID and parent_id columns.";
+        LOG(ERROR) << "Map CSV must contain ClOrdID and order_id_by_algo columns.";
         return false;
     }
 
@@ -1212,11 +1075,11 @@ static bool loadParentMap(const std::string& mapCsv,
         std::vector<std::string> row = parseCsvLine(line);
         if ((int)row.size() <= std::max(clIdx, pIdx)) continue;
         std::string cl = trim(row[(size_t)clIdx]);
-        std::string parent = trim(row[(size_t)pIdx]);
-        if (cl.empty() || parent.empty()) continue;
-        clOrdToParent[cl] = parent;
+        std::string orderIdByAlgo = trim(row[(size_t)pIdx]);
+        if (cl.empty() || orderIdByAlgo.empty()) continue;
+        clOrdToOrderIdByAlgo[cl] = orderIdByAlgo;
     }
-    LOG(INFO) << "Loaded parent map rows: " << clOrdToParent.size();
+    LOG(INFO) << "Loaded order_id_by_algo map rows: " << clOrdToOrderIdByAlgo.size();
     return true;
 }
 
@@ -1243,6 +1106,17 @@ static void applyParentScopedCandidates(const std::unordered_set<int>& candidate
         int idx = *it;
         if (idx < 0 || (size_t)idx >= targets.size()) continue;
         TargetState& target = targets[(size_t)idx];
+        if (scope == MS_PARENT_TEXT) {
+            target.parentDebug.sawParentTextLine = true;
+            target.parentDebug.parentTextFile = sourceFile;
+            target.parentDebug.parentTextExcerpt = lineExcerpt(sourceLine);
+        } else if (scope == MS_PARENT_FIX) {
+            target.parentDebug.sawParentFixLine = true;
+            target.parentDebug.parentFixFile = sourceFile;
+            target.parentDebug.parentFixExcerpt = lineExcerpt(sourceLine);
+            std::string reason = diagnoseAlgoSenderCompid(fixTags, sourceLine);
+            if (!reason.empty()) target.parentDebug.algoSenderMissingReason = reason;
+        }
         applyExtractorSpecs(specs, textKv, fixTags, target, errors, sourceFile, sourceLine, scope);
     }
 }
@@ -1334,9 +1208,10 @@ static size_t scanSingleFileForTargets(const std::string& filePath,
             }
         }
 
-        if (!textClOrd.empty()) {
+        std::string textId = textKv["id"];
+        if (!textId.empty() && line.find("strt:0") != std::string::npos) {
             std::unordered_set<int> parentTextCandidates;
-            collectCandidatesByParent(textClOrd, localByParent, parentTextCandidates);
+            collectCandidatesByParent(textId, localByParent, parentTextCandidates);
             if (!parentTextCandidates.empty()) {
                 applyParentScopedCandidates(parentTextCandidates, targets, textKv, emptyFix,
                                             specs, errors, filePath, line, MS_PARENT_TEXT);
@@ -1354,7 +1229,6 @@ static size_t scanSingleFileForTargets(const std::string& filePath,
                 std::string fixClOrd = fixTags["11"];
                 std::string fixExec  = fixTags["9607"];
                 if (fixExec.empty()) fixExec = fixTags["17"];
-
                 if (fixClOrd.empty() && fixExec.empty()) continue;
 
                 std::unordered_set<int> fixCandidates;
@@ -1377,7 +1251,7 @@ static size_t scanSingleFileForTargets(const std::string& filePath,
                     collectCandidatesByParent(fixClOrd, localByParent, parentFixCandidates);
                     if (!parentFixCandidates.empty()) {
                         applyParentScopedCandidates(parentFixCandidates, targets, textKv, fixTags,
-                                                    specs, errors, filePath, line, MS_PARENT_FIX);
+                                                    specs, errors, filePath, msg, MS_PARENT_FIX);
                     }
                 }
             }
@@ -1393,7 +1267,6 @@ static void scanFilesByTargetFile(const std::unordered_map<std::string, std::vec
                                   std::vector<ErrorRow>& errors,
                                   std::unordered_set<int>& fallbackTargetIdxs) {
     size_t totalMatched = 0;
-
     for (std::unordered_map<std::string, std::vector<int> >::const_iterator it = fileToTargets.begin();
          it != fileToTargets.end(); ++it) {
         const std::string& filePath = it->first;
@@ -1406,16 +1279,13 @@ static void scanFilesByTargetFile(const std::unordered_map<std::string, std::vec
 
         std::ifstream test(filePath.c_str());
         if (!test.is_open()) {
-            LOG(WARNING) << "Target file not accessible, fallback to --log_dir for these targets: " << filePath;
             for (size_t i = 0; i < idxs.size(); ++i) fallbackTargetIdxs.insert(idxs[i]);
             continue;
         }
         test.close();
 
-        size_t matchedNow = scanSingleFileForTargets(filePath, idxs, targets, specs, errors);
-        totalMatched += matchedNow;
+        totalMatched += scanSingleFileForTargets(filePath, idxs, targets, specs, errors);
     }
-
     LOG(INFO) << "Matched in per-file scan: " << totalMatched;
 }
 
@@ -1472,9 +1342,10 @@ static void scanLogDirectorySubset(const std::string& logDir,
                 }
             }
 
-            if (!textClOrd.empty()) {
+            std::string textId = textKv["id"];
+            if (!textId.empty() && line.find("strt:0") != std::string::npos) {
                 std::unordered_set<int> parentTextCandidates;
-                collectCandidatesByParent(textClOrd, localByParent, parentTextCandidates);
+                collectCandidatesByParent(textId, localByParent, parentTextCandidates);
                 if (!parentTextCandidates.empty()) {
                     applyParentScopedCandidates(parentTextCandidates, targets, textKv, emptyFix,
                                                 specs, errors, fullPath, line, MS_PARENT_TEXT);
@@ -1492,22 +1363,30 @@ static void scanLogDirectorySubset(const std::string& logDir,
                     std::string fixClOrd = fixTags["11"];
                     std::string fixExec  = fixTags["9607"];
                     if (fixExec.empty()) fixExec = fixTags["17"];
-
                     if (fixClOrd.empty() && fixExec.empty()) continue;
 
                     std::unordered_set<int> fixCandidates;
                     collectCandidatesByClOrd(fixClOrd, localByClOrd, fixCandidates);
                     collectCandidatesByExec(fixExec, localByExec, fixCandidates);
-                    if (fixCandidates.empty()) continue;
+                    if (!fixCandidates.empty()) {
+                        size_t newly = applyToCandidates(fixCandidates, targets,
+                                                         fixClOrd, fixExec, false,
+                                                         textKv, fixTags,
+                                                         specs, errors,
+                                                         fullPath, line);
+                        if (newly > 0) {
+                            matchedNow += newly;
+                            remaining = (newly >= remaining) ? 0 : (remaining - newly);
+                        }
+                    }
 
-                    size_t newly = applyToCandidates(fixCandidates, targets,
-                                                     fixClOrd, fixExec, false,
-                                                     textKv, fixTags,
-                                                     specs, errors,
-                                                     fullPath, line);
-                    if (newly > 0) {
-                        matchedNow += newly;
-                        remaining = (newly >= remaining) ? 0 : (remaining - newly);
+                    if (!fixClOrd.empty()) {
+                        std::unordered_set<int> parentFixCandidates;
+                        collectCandidatesByParent(fixClOrd, localByParent, parentFixCandidates);
+                        if (!parentFixCandidates.empty()) {
+                            applyParentScopedCandidates(parentFixCandidates, targets, textKv, fixTags,
+                                                        specs, errors, fullPath, msg, MS_PARENT_FIX);
+                        }
                     }
                 }
             }
@@ -1519,22 +1398,12 @@ static void scanLogDirectorySubset(const std::string& logDir,
 }
 
 static std::vector<std::string> buildEnrichedColumns(const std::vector<ExtractorSpec>& specs) {
-    // Output CSV is intentionally narrow:
-    // - One column per spec (spec.out_final_col) only.
-    // - Any mismatches are recorded in search_results/enrich_errors.csv with full details.
     std::vector<std::string> cols;
-    for (size_t i = 0; i < specs.size(); ++i) {
-        const ExtractorSpec& spec = specs[i];
-        cols.push_back(spec.out_final_col);
-    }
-    
-    // Derived / prefilled columns
+    for (size_t i = 0; i < specs.size(); ++i) cols.push_back(specs[i].out_final_col);
     cols.push_back("sor_id");
-    cols.push_back("parent_id");
     cols.push_back("order_id_by_algo");
     return cols;
 }
-
 
 static std::vector<std::string> buildFinalOutputColumns(const std::vector<std::string>& keepOriginalNames,
                                                         const std::vector<std::string>& enrichedCols) {
@@ -1550,20 +1419,14 @@ static std::vector<std::string> buildFinalOutputColumns(const std::vector<std::s
     std::vector<std::string> out;
     out.reserve(kOutputColumnOrder.size() + base.size());
 
-    // First: explicit order (create empty columns if missing).
     for (size_t i = 0; i < kOutputColumnOrder.size(); ++i) {
         const std::string& col = kOutputColumnOrder[i];
-        if (col.empty()) continue;
-        if (seen.insert(col).second) out.push_back(col);
+        if (!col.empty() && seen.insert(col).second) out.push_back(col);
     }
-
-    // Then: remaining columns in default order.
     for (size_t i = 0; i < base.size(); ++i) {
         const std::string& col = base[i];
-        if (col.empty()) continue;
-        if (seen.insert(col).second) out.push_back(col);
+        if (!col.empty() && seen.insert(col).second) out.push_back(col);
     }
-
     return out;
 }
 
@@ -1571,48 +1434,35 @@ static bool writeEnrichedCsv(const std::string& outCsv,
                              const std::vector<std::string>& originalHeaders,
                              const std::vector<TargetState>& targets,
                              const std::vector<std::string>& enrichedCols) {
-    // Decide which original headers to keep, applying drop/rename rules.
     std::vector<int> keepIdx;
     std::vector<std::string> keepNames;
-    keepIdx.reserve(originalHeaders.size());
-    keepNames.reserve(originalHeaders.size());
-
     for (size_t i = 0; i < originalHeaders.size(); ++i) {
         const std::string& h = originalHeaders[i];
         if (kDropOriginalColumns.count(h)) continue;
-
         std::string outName = h;
         std::unordered_map<std::string, std::string>::const_iterator itR = kRenameOriginalColumns.find(h);
         if (itR != kRenameOriginalColumns.end()) outName = itR->second;
-
         keepIdx.push_back((int)i);
         keepNames.push_back(outName);
     }
 
     std::vector<std::string> finalCols = buildFinalOutputColumns(keepNames, enrichedCols);
-
     std::ofstream out(outCsv.c_str());
     if (!out.is_open()) {
         LOG(ERROR) << "Failed to open output CSV: " << outCsv;
         return false;
     }
 
-    // Header
     for (size_t i = 0; i < finalCols.size(); ++i) {
         if (i) out << ",";
         out << csvEscape(finalCols[i]);
     }
     out << "\n";
 
-    // Rows
     for (size_t r = 0; r < targets.size(); ++r) {
         const TargetState& t = targets[r];
-
-        // Build a name->value map for this row (after rename).
         std::unordered_map<std::string, std::string> rowMap;
-        rowMap.reserve(keepNames.size() + enrichedCols.size() + kExtraEmptyColumns.size() + 8);
 
-        // Original columns
         for (size_t k = 0; k < keepIdx.size(); ++k) {
             int idx = keepIdx[k];
             const std::string& name = keepNames[k];
@@ -1622,12 +1472,10 @@ static bool writeEnrichedCsv(const std::string& outCsv,
             rowMap[name] = v;
         }
 
-        // Enriched columns
         for (size_t i = 0; i < enrichedCols.size(); ++i) {
             const std::string& name = enrichedCols[i];
             std::unordered_map<std::string, std::string>::const_iterator it = t.outValues.find(name);
             std::string v = (it == t.outValues.end()) ? std::string("") : it->second;
-
             if (v.empty() || v == unknownValue()) {
                 std::unordered_map<std::string, ValueType>::const_iterator jt = gEnrichedColTypes.find(name);
                 ValueType vt = (jt == gEnrichedColTypes.end()) ? VT_STRING : jt->second;
@@ -1636,13 +1484,11 @@ static bool writeEnrichedCsv(const std::string& outCsv,
             rowMap[name] = v;
         }
 
-        // Extra empty columns (explicitly blank, not UNKNOWN)
         for (size_t i = 0; i < kExtraEmptyColumns.size(); ++i) {
             const std::string& name = kExtraEmptyColumns[i];
             if (!name.empty() && rowMap.find(name) == rowMap.end()) rowMap[name] = "";
         }
 
-        // Write in final column order
         for (size_t c = 0; c < finalCols.size(); ++c) {
             if (c) out << ",";
             const std::string& name = finalCols[c];
@@ -1652,7 +1498,6 @@ static bool writeEnrichedCsv(const std::string& outCsv,
         }
         out << "\n";
     }
-
     return true;
 }
 
@@ -1678,29 +1523,85 @@ static bool writeErrorCsv(const std::string& errCsv,
     return true;
 }
 
+static bool writeParentMissingCsv(const std::string& path,
+                                  const std::vector<TargetState>& targets) {
+    std::ofstream out(path.c_str());
+    if (!out.is_open()) {
+        LOG(ERROR) << "Failed to open parent missing debug CSV: " << path;
+        return false;
+    }
+
+    out << "clordid,execid,order_id_by_algo,file_path,saw_parent_text_line,saw_parent_fix_line,missing_algo_id,missing_onleave_internal,missing_onleave_market,missing_algo_sender_compid,algo_sender_missing_reason,parent_text_file,parent_fix_file,parent_text_excerpt,parent_fix_excerpt\n";
+
+    size_t rows = 0;
+    for (size_t i = 0; i < targets.size(); ++i) {
+        const TargetState& t = targets[i];
+        if (t.row.parentId.empty()) continue;
+
+        std::string algoId = "";
+        std::string oitn = "";
+        std::string omkt = "";
+        std::string algoSender = "";
+
+        std::unordered_map<std::string, std::string>::const_iterator it;
+        it = t.outValues.find("algo_id"); if (it != t.outValues.end()) algoId = trim(it->second);
+        it = t.outValues.find("onleave_internal"); if (it != t.outValues.end()) oitn = trim(it->second);
+        it = t.outValues.find("onleave_market"); if (it != t.outValues.end()) omkt = trim(it->second);
+        it = t.outValues.find("algo_sender_compid"); if (it != t.outValues.end()) algoSender = trim(it->second);
+
+        bool missingAlgoId = algoId.empty() || algoId == unknownValue();
+        bool missingOitn = oitn.empty() || oitn == unknownValue();
+        bool missingOmkt = omkt.empty() || omkt == unknownValue();
+        bool missingAlgoSender = algoSender.empty() || algoSender == unknownValue();
+
+        if (!missingAlgoId && !missingOitn && !missingOmkt && !missingAlgoSender) continue;
+        ++rows;
+
+        std::string reason = t.parentDebug.algoSenderMissingReason;
+        if (reason.empty() && missingAlgoSender) {
+            if (!t.parentDebug.sawParentFixLine) reason = "parent_fix_line_not_found_in_scanned_scope";
+            else reason = "algo_sender_compid_not_populated";
+        }
+
+        out << csvEscape(t.row.clOrdId) << ","
+            << csvEscape(t.row.execId) << ","
+            << csvEscape(t.row.parentId) << ","
+            << csvEscape(t.row.filePath) << ","
+            << (t.parentDebug.sawParentTextLine ? "1" : "0") << ","
+            << (t.parentDebug.sawParentFixLine ? "1" : "0") << ","
+            << (missingAlgoId ? "1" : "0") << ","
+            << (missingOitn ? "1" : "0") << ","
+            << (missingOmkt ? "1" : "0") << ","
+            << (missingAlgoSender ? "1" : "0") << ","
+            << csvEscape(reason) << ","
+            << csvEscape(t.parentDebug.parentTextFile) << ","
+            << csvEscape(t.parentDebug.parentFixFile) << ","
+            << csvEscape(t.parentDebug.parentTextExcerpt) << ","
+            << csvEscape(t.parentDebug.parentFixExcerpt) << "\n";
+    }
+
+    LOG(INFO) << "Wrote parent missing debug CSV: " << path << " rows=" << rows;
+    return true;
+}
+
 static bool runEnrichDiff(const std::string& diffCsv,
                           const std::string& logDir,
                           const std::string& outCsv,
                           const std::string& parentMapCsv) {
     std::vector<ExtractorSpec> specs = buildExtractorSpecs();
 
-    // Build enriched column -> type map for type-aware default missing values.
     gEnrichedColTypes.clear();
-    for (size_t i = 0; i < specs.size(); ++i) {
-        gEnrichedColTypes[specs[i].out_final_col] = specs[i].value_type;
-    }
+    for (size_t i = 0; i < specs.size(); ++i) gEnrichedColTypes[specs[i].out_final_col] = specs[i].value_type;
     gEnrichedColTypes["sor_id"] = VT_STRING;
-    gEnrichedColTypes["parent_id"] = VT_STRING;
     gEnrichedColTypes["order_id_by_algo"] = VT_STRING;
+
     std::vector<std::string> headers;
     std::vector<TargetState> targets;
     std::unordered_map<std::string, std::vector<int> > byClOrd;
     std::unordered_map<std::string, std::vector<int> > byExec;
     bool hasFileColumn = false;
 
-    if (!loadDiffCsv(diffCsv, headers, targets, byClOrd, byExec, hasFileColumn)) {
-        return false;
-    }
+    if (!loadDiffCsv(diffCsv, headers, targets, byClOrd, byExec, hasFileColumn)) return false;
 
     std::unordered_map<std::string, std::string> clOrdToParent;
     if (!parentMapCsv.empty()) {
@@ -1709,17 +1610,12 @@ static bool runEnrichDiff(const std::string& diffCsv,
 
     initializeDefaultOutputs(targets, specs);
 
-    // Fill row-derived columns that do not require log scanning.
     for (size_t i = 0; i < targets.size(); ++i) {
         const std::string& cl = targets[i].row.clOrdId;
-        if (!cl.empty()) targets[i].outValues["sor_id"] = getServerNum(cl[0]);
-        else targets[i].outValues["sor_id"] = "unknown";
-
+        targets[i].outValues["sor_id"] = (!cl.empty()) ? getServerNum(cl[0]) : "unknown";
         std::unordered_map<std::string, std::string>::const_iterator itp = clOrdToParent.find(cl);
         if (itp != clOrdToParent.end()) {
             targets[i].row.parentId = itp->second;
-            targets[i].outValues["parent"] = itp->second;
-            targets[i].outValues["parent_id"] = itp->second;
             targets[i].outValues["order_id_by_algo"] = itp->second;
         }
     }
@@ -1739,14 +1635,10 @@ static bool runEnrichDiff(const std::string& diffCsv,
         scanFilesByTargetFile(fileToTargets, targets, specs, errors, fallbackTargetIdxs);
 
         if (!fallbackTargetIdxs.empty()) {
-            if (logDir.empty()) {
-                LOG(WARNING) << "Some targets have empty/invalid File path, but --log_dir is not provided."
-                             << " Remaining targets may stay UNKNOWN.";
-            } else {
+            if (!logDir.empty()) {
                 std::vector<int> fallbackVec;
                 fallbackVec.reserve(fallbackTargetIdxs.size());
-                for (std::unordered_set<int>::const_iterator it = fallbackTargetIdxs.begin();
-                     it != fallbackTargetIdxs.end(); ++it) {
+                for (std::unordered_set<int>::const_iterator it = fallbackTargetIdxs.begin(); it != fallbackTargetIdxs.end(); ++it) {
                     fallbackVec.push_back(*it);
                 }
                 scanLogDirectorySubset(logDir, fallbackVec, targets, specs, errors);
@@ -1757,7 +1649,6 @@ static bool runEnrichDiff(const std::string& diffCsv,
             LOG(ERROR) << "Diff CSV has no File column and --log_dir is missing.";
             return false;
         }
-
         std::vector<int> allIdx;
         allIdx.reserve(targets.size());
         for (size_t i = 0; i < targets.size(); ++i) allIdx.push_back((int)i);
@@ -1770,6 +1661,9 @@ static bool runEnrichDiff(const std::string& diffCsv,
     std::string errorPath = "search_results/enrich_errors.csv";
     if (!writeErrorCsv(errorPath, errors)) return false;
 
+    std::string parentMissingPath = "search_results/parent_missing_debug.csv";
+    if (!writeParentMissingCsv(parentMissingPath, targets)) return false;
+
     size_t matchedCount = 0;
     for (size_t i = 0; i < targets.size(); ++i) if (targets[i].matched) ++matchedCount;
 
@@ -1778,16 +1672,6 @@ static bool runEnrichDiff(const std::string& diffCsv,
     LOG(INFO) << "Wrote mismatch errors CSV: " << errorPath << " rows=" << errors.size();
     return true;
 }
-
-// =========================
-// main
-// =========================
-//
-// Usage:
-//   ./fix_pipeline scan_all <log_directory> [--out search_results/master_executions.csv]
-//   ./fix_pipeline enrich_diff --diff_csv <path> --out_csv <path> [--log_dir <dir>]
-//
-// Note: for enrich_diff, if diff CSV has `File` column, --log_dir becomes optional.
 
 int main(int argc, char* argv[]) {
     ensureDir("./logs");
@@ -1805,7 +1689,6 @@ int main(int argc, char* argv[]) {
     }
 
     std::string mode = argv[1];
-
     if (mode == "scan_all") {
         if (argc < 3) {
             std::cerr << "Usage: " << argv[0] << " scan_all <log_directory> [--out <csv_path>]\n";
@@ -1830,7 +1713,6 @@ int main(int argc, char* argv[]) {
             else if ((arg == "--log_dir" || arg == "-l") && i + 1 < argc) logDir = argv[++i];
             else if ((arg == "--out_csv" || arg == "-o") && i + 1 < argc) outCsv = argv[++i];
             else if (arg == "--parent_map" && i + 1 < argc) parentMapCsv = argv[++i];
-            else LOG(WARNING) << "Unknown/ignored argument: " << arg;
         }
 
         if (diffCsv.empty() || outCsv.empty()) {
